@@ -15,35 +15,120 @@ bf.init_snapshot(snapshot_path, name="s1", overwrite=True)
 
 os.makedirs(output_dir, exist_ok=True)
 
-# 1. Node Properties
+# 1. Nodes
 nodes_df = bf.q.nodeProperties().answer().frame()
 nodes_df.to_csv(f"{output_dir}/nodes.csv")
 print("=== Nodes ===")
 print(nodes_df)
 
-# 2. Интерфейсы
+# 2. Interfaces
 interfaces_df = bf.q.interfaceProperties().answer().frame()
 interfaces_df.to_csv(f"{output_dir}/interfaces.csv")
 print("\n=== Interfaces ===")
 print(interfaces_df)
 
-# 3. BGP-сессии (замена устаревшего bgpNeighbors)
+# 3. Filter Line Reachability
 try:
-    bgp_sessions_df = bf.q.bgpSession().answer().frame()
-    bgp_sessions_df.to_csv(f"{output_dir}/bgp_sessions.csv")
-    print("\n=== BGP Sessions ===")
-    print(bgp_sessions_df)
+    filter_df = bf.q.filterLineReachability().answer().frame()
+    filter_df.to_csv(f"{output_dir}/filter_line_reachability.csv")
+    print("\n=== Filter Line Reachability ===")
+    print(filter_df.head(5))
 except Exception as e:
-    print("BGP Sessions not available:", e)
+    print("Filter Line Reachability not available:", e)
 
-# 4. ACLs
+# 4. BGP Session Compatibility
 try:
-    acls_df = bf.q.accessLists().answer().frame()
-    acls_df.to_csv(f"{output_dir}/acls.csv")
-    print("\n=== ACLs ===")
-    print(acls_df)
+    bgp_compat_df = bf.q.bgpSessionCompatibility().answer().frame()
+    bgp_compat_df.to_csv(f"{output_dir}/bgp_session_compatibility.csv")
+    print("\n=== BGP Session Compatibility ===")
+    print(bgp_compat_df.head(5))
 except Exception as e:
-    print("ACLs not available:", e)
+    print("BGP Session Compatibility not available:", e)
+
+# 5. BGP Session Status
+try:
+    bgp_status_df = bf.q.bgpSessionStatus().answer().frame()
+    bgp_status_df.to_csv(f"{output_dir}/bgp_session_status.csv")
+    print("\n=== BGP Session Status ===")
+    print(bgp_status_df.head(5))
+except Exception as e:
+    print("BGP Session Status not available:", e)
+
+# 6. BGP Edges
+try:
+    bgp_edges_df = bf.q.bgpEdges().answer().frame()
+    bgp_edges_df.to_csv(f"{output_dir}/bgp_edges.csv")
+    print("\n=== BGP Edges ===")
+    print(bgp_edges_df.head(5))
+except Exception as e:
+    print("BGP Edges not available:", e)
+
+# 7. OSPF Session Compatibility
+try:
+    ospf_df = bf.q.ospfSessionCompatibility().answer().frame()
+    ospf_df.to_csv(f"{output_dir}/ospf_session_compatibility.csv")
+    print("\n=== OSPF Session Compatibility ===")
+    print(ospf_df.head(5))
+except Exception as e:
+    print("OSPF Session Compatibility not available:", e)
+
+# 8. OSPF Edges
+try:
+    ospf_edges_df = bf.q.ospfEdges().answer().frame()
+    ospf_edges_df.to_csv(f"{output_dir}/ospf_edges.csv")
+    print("\n=== OSPF Edges ===")
+    print(ospf_edges_df.head(5))
+except Exception as e:
+    print("OSPF Edges not available:", e)
+
+
+
+# #!/usr/bin/env python3
+# from pybatfish.client.session import Session
+# import os
+
+# # Настройки
+# bf_address = "127.0.0.1"
+# snapshot_path = "./snapshots/ci_net/s1"
+# output_dir = "./output"
+# network_name = "ci_net"
+
+# # Подключение к Batfish
+# bf = Session(host=bf_address)
+# bf.set_network(network_name)
+# bf.init_snapshot(snapshot_path, name="s1", overwrite=True)
+
+# os.makedirs(output_dir, exist_ok=True)
+
+# # 1. Node Properties
+# nodes_df = bf.q.nodeProperties().answer().frame()
+# nodes_df.to_csv(f"{output_dir}/nodes.csv")
+# print("=== Nodes ===")
+# print(nodes_df)
+
+# # 2. Интерфейсы
+# interfaces_df = bf.q.interfaceProperties().answer().frame()
+# interfaces_df.to_csv(f"{output_dir}/interfaces.csv")
+# print("\n=== Interfaces ===")
+# print(interfaces_df)
+
+# # 3. BGP-сессии (замена устаревшего bgpNeighbors)
+# try:
+#     bgp_sessions_df = bf.q.bgpSession().answer().frame()
+#     bgp_sessions_df.to_csv(f"{output_dir}/bgp_sessions.csv")
+#     print("\n=== BGP Sessions ===")
+#     print(bgp_sessions_df)
+# except Exception as e:
+#     print("BGP Sessions not available:", e)
+
+# # 4. ACLs
+# try:
+#     acls_df = bf.q.accessLists().answer().frame()
+#     acls_df.to_csv(f"{output_dir}/acls.csv")
+#     print("\n=== ACLs ===")
+#     print(acls_df)
+# except Exception as e:
+#     print("ACLs not available:", e)
 
 
 # #!/usr/bin/env python3
