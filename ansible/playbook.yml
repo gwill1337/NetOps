@@ -5,7 +5,7 @@
   tasks:
     - name: Ensure snapshot dir exists
       ansible.builtin.file:
-        path: "snapshots/ci_net/s1/configs"
+        path: snapshots/ci_net/s1/
         state: directory
         mode: '0755'
 
