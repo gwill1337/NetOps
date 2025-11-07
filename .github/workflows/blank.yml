@@ -45,7 +45,7 @@ jobs:
       run: sudo mkdir -p snapshots/ci_net/s1
       
     - name: Run Ansible (copy configs -> snapshots)
-      run: sudo ansible-playbook ansible/playbook.yml -i ansible/hosts
+      run:  ansible-playbook ansible/playbook.yml -i ansible/hosts
 
     - name: Run tests (pytest)
       run: sudo pytest -q
