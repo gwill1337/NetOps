@@ -10,8 +10,8 @@ jobs:
 
     - name: Start Batfish (Docker)
       run: |
-        docker pull batfish/allinone
-        docker run -d --name batfish \
+        sudo docker pull batfish/allinone
+        sudo docker run -d --name batfish \
           -v "${{ github.workspace }}/snapshots:/data/snapshots" \
           -p 8888:8888 -p 9996:9996 \
           batfish/allinone
@@ -42,10 +42,10 @@ jobs:
         done
 
     - name: Ensure snapshot folder exists
-      run: mkdir -p snapshots/ci_net/s1
+      run: sudo mkdir -p snapshots/ci_net/s1
       
     - name: Run Ansible (copy configs -> snapshots)
-      run: ansible-playbook ansible/playbook.yml -i ansible/hosts
+      run: sudo ansible-playbook ansible/playbook.yml -i ansible/hosts
 
     - name: Run tests (pytest)
-      run: pytest -q
+      run: sudo pytest -q
