@@ -1,29 +1,40 @@
-name: Batfish CI
-
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+name: CI
+on: [push, pull_request]
 
 jobs:
-  batfish:
+  batfish-ci:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
-    - name: Set up Python
+    - name: Start Batfish (Docker)
+      run: |
+        docker pull batfish/allinone
+        docker run -d --name batfish \
+          -v "${{ github.workspace }}/snapshots:/data/snapshots" \
+          -p 8888:8888 -p 9996:9996 \
+          batfish/allinone
+        # wait until Batfish API responds (short loop)
+        for i in {1..30}; do
+          if curl -sSf http://localhost:9996/v1/help >/dev/null 2>&1; then
+            echo "batfish ready"; break
+          fi
+          sleep 1
+        done
+
+    - name: Setup Python 3.11
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
+        python-version: '3.11'
 
-    - name: Install dependencies
+    - name: Install deps (pybatfish, pytest, ansible)
       run: |
         python -m pip install --upgrade pip
-        pip install ansible batfish-client
+        pip install pybatfish==2025.7.7.2423 pytest ansible
 
-    - name: Run Ansible playbook
-      run: |
-        ansible-playbook playbooks/run_batfish.yml
+    - name: Run Ansible (copy configs -> snapshots)
+      run: ansible-playbook ansible/playbook.yml -i ansible/hosts
+
+    - name: Run tests (pytest)
+      run: pytest -q
