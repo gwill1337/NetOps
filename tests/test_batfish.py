@@ -1,67 +1,257 @@
 #!/usr/bin/env python3
-from pybatfish.client.session import Session
-import os
 import sys
+import logging
+import argparse
+from pybatfish.client.commands import *
+from pybatfish.question.question import load_questions, list_questions
+from pybatfish.question import bfq
+from pybatfish.datamodel.flow import HeaderConstraints as header
 
-# Настройки
-bf_address = "127.0.0.1"
-snapshot_path = "./snapshots/ci_net/s1"
-network_name = "ci_net"
 
-bf = Session(host=bf_address)
-bf.set_network(network_name)
-bf.init_snapshot(snapshot_path, name="s1", overwrite=True)
+def test_dataplane(isFailed, fromNode, checkMultipath=True):
+    ips = bfq.ipOwners().answer().frame()
+    loopbacks = ips[(ips['Interface'] == 'Loopback0') & (ips['Active'])]
 
-errors = []
+    localIP = loopbacks[loopbacks['Node'] == fromNode]['IP'][0]
+    leaves = set(loopbacks[loopbacks['Node'].str.contains('leaf')]['IP'])
+    leaves.remove(localIP)
+    spines = set(loopbacks[loopbacks['Node'].str.contains('spine')]['IP'])
+    mpath = len(spines)
 
-# 1. Проверка наличия всех ожидаемых узлов
-expected_nodes = {"router1", "router2", "router3", "router4", "router5"}
-nodes = set(bf.q.nodeProperties().answer().frame()["Node"])
-missing_nodes = expected_nodes - nodes
-if missing_nodes:
-    errors.append(f"Missing nodes: {missing_nodes}")
+    logging.info("Progress: Analyzing traceroute from Leaf-3 to Leaf-1 and Leaf-2")
+    # Set up the resulting data structure
+    troute = dict()
+    for leaf in leaves:
+        troute[leaf] = dict()
 
-# 2. Проверка интерфейсов: все активны
-interfaces_df = bf.q.interfaceProperties().answer().frame()
-down_interfaces = interfaces_df[interfaces_df["Active"] == False]
-if not down_interfaces.empty:
-    errors.append(f"Inactive interfaces:\n{down_interfaces[['Interface','Node']]}")
+    # Build headers for traceroute flows
+    for leaf in leaves:
+        troute[leaf]['header'] = header(srcIps=localIP,dstIps=leaf)
 
-# 3. Проверка BGP Session Compatibility
-try:
-    bgp_compat = bf.q.bgpSessionCompatibility().answer().frame()
-    incompatible = bgp_compat[bgp_compat["Configured_Status"] != "UNIQUE_MATCH"]
-    if not incompatible.empty:
-        errors.append(f"Incompatible BGP sessions:\n{incompatible[['Node','Remote_Node','Configured_Status']]}")
-except Exception as e:
-    errors.append(f"BGP Session Compatibility check failed: {e}")
+    # Ask questions about traceroute
+    for leaf,data in troute.items():
+        troute[leaf]['trace'] = bfq.traceroute(startLocation=fromNode, headers=data['header']).answer()
+    
+    # Get first flow disposition for traces
+    for leaf,data in troute.items():
+        troute[leaf]['result'] = data['trace'].get('answerElements')[0]['rows'][0]['Traces'][0]['disposition']
 
-# 4. Проверка OSPF Session Compatibility
-try:
-    ospf_compat = bf.q.ospfSessionCompatibility().answer().frame()
-    not_established = ospf_compat[ospf_compat["Session_Status"] != "ESTABLISHED"]
-    if not not_established.empty:
-        errors.append(f"OSPF sessions not established:\n{not_established[['Interface','Remote_Interface','Session_Status']]}")
-except Exception as e:
-    errors.append(f"OSPF Session Compatibility check failed: {e}")
+    # Get traceroute paths to reach Leaf-1 and  Leaf-2
+    for leaf,data in troute.items():
+        troute[leaf]['paths'] = data['trace'].get('answerElements')[0]['rows'][0]['Traces']
 
-# 5. Проверка ACL: отсутствие unreachable lines
-try:
-    filters = bf.q.filterLineReachability().answer().frame()
-    unreachable = filters[filters["Unreachable_Line"].notnull()]
-    if not unreachable.empty:
-        errors.append(f"Unreachable filter lines:\n{unreachable[['Sources','Unreachable_Line','Reason']]}")
-except Exception as e:
-    errors.append(f"Filter Line Reachability check failed: {e}")
+    # Get traceroute hops to reach Leaf-1 and Leaf-2
+    for leaf,data in troute.items():
+        troute[leaf]['hops'] = data['trace'].get('answerElements')[0]['rows'][0]['Traces'][0].get('hops',[])
 
-# Результат теста
-if errors:
-    print("VALIDATION FAILED:")
-    for err in errors:
-        print("-", err)
-    sys.exit(1)
-else:
-    print("VALIDATION PASSED: All nodes, interfaces, BGP/OSPF sessions, and filters are OK.")
+    # Now let's check that the traceroute behaves as we expect
+    for leaf, data in troute.items():
+        if data['result'] != 'ACCEPTED':
+            logging.error("Traceroute to {} has failed: {}".format(leaf, data['result']))
+            isFailed = True
+        else:
+            logging.info("Traceroute Progress: {}".format(data['result']))
+        # Number of paths should be equal to the number of spines
+        if len(data['paths']) != mpath:
+            logging.error("Number of paths {} != {} number of spines".format(len(data['paths']), mpath))
+            logging.error(data['paths'])
+            isFailed = True
+        else:
+            logging.info("Number of paths {} == {} number of spines".format(len(data['paths']), mpath))
+        # Traceroute has to traverse exactly two hops
+        for path in data['paths']:
+            if len(path.get('hops',[])) != 2+1: # newer versions of batfish now include source as one of the hops
+                logging.error("Traceroute has not traversed exactly two hops")
+                logging.error(path)
+                isFailed = True 
+            else:
+                logging.info("Traceroute traversed exactly two hops")
+    
+    return isFailed
+
+def test_controlplane(isFailed):
+    # Define a list of Spine switches
+    spines = set(bfq.nodeProperties(nodes='spine.*').answer().frame()['Node'])
+    logging.info("Progress: Analyzing control plane properties")
+
+    # Get all BGP session status for leaf nodes
+    bgp = bfq.bgpSessionStatus(nodes='leaf.*').answer().frame()
+    
+    # All leaves should have at least one peering with each spine
+    violators = bgp.groupby('Node').filter(lambda x: set(x['Remote_Node']).difference(spines) != set([]))
+    if len(violators) > 0:
+        logging.error("Found leaves that do not have at least one peering to each spine")
+        logging.error(violators[['Node', 'Remote_Node']])
+        isFailed = True
+    else:
+        logging.info("All leaves have at least one peering with each spine")
+   
+    # All leaves should only peer with spines
+    non_spines = bgp[~bgp['Remote_Node'].str.contains('spine', na=False)]
+    if len(non_spines) > 0:
+        logging.error("Leaves do not only peer with spines")
+        logging.error(non_spines[['Node', 'Remote_Node']])
+        isFailed = True
+    else:
+        logging.info("Leaves only peer with spines")
+
+    return isFailed
+
+def test_config_sanity(isFailed):
+    logging.info("Progress: Searching for unused and undefined data structures")
+    # Find all undefined data structures
+    undefined = bfq.undefinedReferences().answer().frame()
+    if len(undefined) >  0:
+        logging.error("Found undefined data structures")
+        logging.error(undefined)
+        isFailed = True
+    else:
+        logging.info("No undefined data structures found")
+
+    # Find all unused data structures
+    unused = bfq.unusedStructures().answer().frame()
+    if len(unused) >  0:
+        logging.error("Found unused data structures")
+        logging.error(unused)
+        isFailed = True
+    else:
+        logging.info("No unused data structures found")
+
+    return isFailed
+
+def print_reduced_rechability(answer):
+    logging.info("Progress: the following flows will fail as the result of an outage")
+    for row in answer['rows']:
+        logging.info("{} -> {}".format(row['Flow']['srcIp'], row['Flow']['dstIp']))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Script to test network configs with batfish")
+    parser.add_argument(
+        "--host",
+        help="IP/host of the batfish server",
+        default='localhost',
+        type=str
+    )
+    parser.add_argument(
+        "--candidate",
+        help='Path to directory containing candidate device configuration folder',
+        default='./candidate',
+        type=str
+    )
+    parser.add_argument(
+        "--failure",
+        help='Path to directory containing candidate device configuration folder with injected failure conditions',
+        default='./candidate-with-failure',
+        type=str
+    )
+    parser.add_argument(
+        "--log",
+        help='Path to logging file',
+        type=str
+    )
+    
+    args = parser.parse_args()
+    
+    bf_session.coordinatorHost = args.host 
+    
+    #bf_logger.setLevel(logging.WARN)
+    
+    if args.log:
+        logging.basicConfig(filename=args.log, format='%(levelname)s: %(message)s', level=logging.INFO)
+        console = logging.StreamHandler()
+        console.setLevel(logging.ERROR)
+        logging.getLogger('').addHandler(console)
+
+    load_questions()
+    bf_init_snapshot(args.candidate, name='candidate')
+    bf_init_snapshot(args.failure, name='failure')
+
+    bf_set_snapshot('candidate')
+    csFailed = test_config_sanity(False)
+    cpFailed = test_controlplane(False)
+    dpFailed = test_dataplane(False, fromNode='leaf-3')
+
+    logging.info("\nProgress: analysing failure conditions")
+    bf_set_snapshot('failure')
+    dpFailedoutage = test_dataplane(False, fromNode='leaf-3')
+    rr = bfq.differentialReachability().answer(snapshot='candidate', reference_snapshot='failure')
+    print_reduced_rechability(rr.get('answerElements')[0])
+
+    
+
+    
+
+    return 0 if not any([cpFailed, dpFailed, csFailed, dpFailedoutage]) else 1
+
+if __name__ == '__main__':
+    sys.exit(main())
+# ==================================================
+
+# #!/usr/bin/env python3
+# from pybatfish.client.session import Session
+# import os
+# import sys
+
+# # Настройки
+# bf_address = "127.0.0.1"
+# snapshot_path = "./snapshots/ci_net/s1"
+# network_name = "ci_net"
+
+# bf = Session(host=bf_address)
+# bf.set_network(network_name)
+# bf.init_snapshot(snapshot_path, name="s1", overwrite=True)
+
+# errors = []
+
+# # 1. Проверка наличия всех ожидаемых узлов
+# expected_nodes = {"router1", "router2", "router3", "router4", "router5"}
+# nodes = set(bf.q.nodeProperties().answer().frame()["Node"])
+# missing_nodes = expected_nodes - nodes
+# if missing_nodes:
+#     errors.append(f"Missing nodes: {missing_nodes}")
+
+# # 2. Проверка интерфейсов: все активны
+# interfaces_df = bf.q.interfaceProperties().answer().frame()
+# down_interfaces = interfaces_df[interfaces_df["Active"] == False]
+# if not down_interfaces.empty:
+#     errors.append(f"Inactive interfaces:\n{down_interfaces[['Interface','Node']]}")
+
+# # 3. Проверка BGP Session Compatibility
+# try:
+#     bgp_compat = bf.q.bgpSessionCompatibility().answer().frame()
+#     incompatible = bgp_compat[bgp_compat["Configured_Status"] != "UNIQUE_MATCH"]
+#     if not incompatible.empty:
+#         errors.append(f"Incompatible BGP sessions:\n{incompatible[['Node','Remote_Node','Configured_Status']]}")
+# except Exception as e:
+#     errors.append(f"BGP Session Compatibility check failed: {e}")
+
+# # 4. Проверка OSPF Session Compatibility
+# try:
+#     ospf_compat = bf.q.ospfSessionCompatibility().answer().frame()
+#     not_established = ospf_compat[ospf_compat["Session_Status"] != "ESTABLISHED"]
+#     if not not_established.empty:
+#         errors.append(f"OSPF sessions not established:\n{not_established[['Interface','Remote_Interface','Session_Status']]}")
+# except Exception as e:
+#     errors.append(f"OSPF Session Compatibility check failed: {e}")
+
+# # 5. Проверка ACL: отсутствие unreachable lines
+# try:
+#     filters = bf.q.filterLineReachability().answer().frame()
+#     unreachable = filters[filters["Unreachable_Line"].notnull()]
+#     if not unreachable.empty:
+#         errors.append(f"Unreachable filter lines:\n{unreachable[['Sources','Unreachable_Line','Reason']]}")
+# except Exception as e:
+#     errors.append(f"Filter Line Reachability check failed: {e}")
+
+# # Результат теста
+# if errors:
+#     print("VALIDATION FAILED:")
+#     for err in errors:
+#         print("-", err)
+#     sys.exit(1)
+# else:
+#     print("VALIDATION PASSED: All nodes, interfaces, BGP/OSPF sessions, and filters are OK.")
 
 
 
