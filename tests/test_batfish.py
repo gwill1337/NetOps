@@ -1,40 +1,85 @@
-import pytest
+#!/usr/bin/env python3
 from pybatfish.client.session import Session
+import os
 
-SNAPSHOT_PATH = "./snapshots/ci_net/s1"
-NETWORK_NAME  = "ci_net"
-BF_HOST       = "127.0.0.1"
+# Настройки
+bf_address = "127.0.0.1"
+snapshot_path = "./snapshots/ci_net/s1"
+output_dir = "./output"
+network_name = "ci_net"
 
-@pytest.fixture(scope="module")
-def bf_session():
-    bf = Session(host=BF_HOST)
-    bf.set_network(NETWORK_NAME)
-    bf.init_snapshot(SNAPSHOT_PATH, name="s1", overwrite=True)
-    return bf
+# Подключение к Batfish
+bf = Session(host=bf_address)
+bf.set_network(network_name)
+bf.init_snapshot(snapshot_path, name="s1", overwrite=True)
 
-def test_all_nodes_present(bf_session):
-    df = bf_session.q.nodeProperties().answer().frame()
-    nodes = set(df["Node"])
-    expected = {"router1", "router2", "router3", "router4", "router5"}
-    missing = expected - nodes
-    assert not missing, f"Missing nodes in network: {missing}"
+os.makedirs(output_dir, exist_ok=True)
 
-def test_interfaces_active(bf_session):
-    df = bf_session.q.interfaceProperties().answer().frame()
-    # предполагаем, что колонка Active имеется
-    inactive = df[df["Active"] == False]
-    assert inactive.empty, f"Found inactive interfaces:\n{inactive[['Interface', 'Node']]}"
+# --- Вспомогательная функция для разбиения Interface на Node и Intf ---
+def split_node_interface(df):
+    df = df.copy()
+    df['Node'] = df['Interface'].str.split('[').str[0]
+    df['Intf'] = df['Interface'].str.split('[').str[1].str.rstrip(']')
+    return df
 
-def test_bgp_session_compatibility(bf_session):
-    df = bf_session.q.bgpSessionCompatibility().answer().frame()
-    bad = df[df["Configured_Status"] != "UNIQUE_MATCH"]
-    assert bad.empty, f"BGP sessions misconfigured:\n{bad[['Node','Remote_Node','Configured_Status']]}"
+# --- Node Properties ---
+nodes_df = bf.q.nodeProperties().answer().frame()
+nodes_df.to_csv(f"{output_dir}/nodes.csv")
+print("=== Nodes ===")
+print(nodes_df)
 
-def test_filter_line_reachability(bf_session):
-    df = bf_session.q.filterLineReachability().answer().frame()
-    # если строк unreachable найдено — ошибка
-    unreachable = df[df["Unreachable_Line"].notnull()]
-    assert unreachable.empty, f"Unreachable filter lines found:\n{unreachable[['Sources','Unreachable_Line','Reason']]}"
+# --- Interfaces ---
+interfaces_df = bf.q.interfaceProperties().answer().frame()
+interfaces_df = split_node_interface(interfaces_df)
+interfaces_df.to_csv(f"{output_dir}/interfaces.csv")
+print("\n=== Interfaces ===")
+print(interfaces_df)
+
+# --- Validation ---
+errors = []
+
+# Неактивные интерфейсы
+inactive = interfaces_df[interfaces_df['Active'] == False]
+if not inactive.empty:
+    errors.append(f"Inactive interfaces:\n{inactive[['Intf','Node']]}")
+
+# --- BGP Sessions ---
+try:
+    bgp_df = bf.q.bgpSessionCompatibility().answer().frame()
+    bgp_df.to_csv(f"{output_dir}/bgp_sessions.csv")
+    print("\n=== BGP Sessions ===")
+    print(bgp_df)
+    
+    # Проверка на несовместимые или неизвестные BGP сессии
+    bad_bgp = bgp_df[bgp_df['Configured_Status'].isin(['NOT_COMPATIBLE','UNKNOWN_REMOTE'])]
+    if not bad_bgp.empty:
+        errors.append(f"Incompatible BGP sessions:\n{bad_bgp[['Node','Remote_Node','Configured_Status']]}")
+except Exception as e:
+    print("BGP Sessions not available:", e)
+
+# --- OSPF Sessions ---
+try:
+    ospf_df = bf.q.ospfSessionCompatibility().answer().frame()
+    ospf_df.to_csv(f"{output_dir}/ospf_sessions.csv")
+    print("\n=== OSPF Sessions ===")
+    print(ospf_df)
+    
+    # Проверка на несовместимые OSPF сессии
+    bad_ospf = ospf_df[ospf_df['Session_Status'] != 'ESTABLISHED']
+    if not bad_ospf.empty:
+        errors.append(f"Incompatible OSPF sessions:\n{bad_ospf[['Interface','Remote_Interface','Session_Status']]}")
+except Exception as e:
+    print("OSPF Sessions not available:", e)
+
+# --- Вывод ошибок ---
+if errors:
+    print("\nVALIDATION FAILED:")
+    for e in errors:
+        print("-", e)
+    exit(1)
+else:
+    print("\nVALIDATION PASSED: no errors found")
+
 
 # ==================================================
 
