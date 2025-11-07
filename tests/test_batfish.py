@@ -1,86 +1,156 @@
 #!/usr/bin/env python3
 from pybatfish.client.session import Session
 import os
+import sys
 
 # Настройки
 bf_address = "127.0.0.1"
 snapshot_path = "./snapshots/ci_net/s1"
-output_dir = "./output"
 network_name = "ci_net"
 
-# Подключение к Batfish
 bf = Session(host=bf_address)
 bf.set_network(network_name)
 bf.init_snapshot(snapshot_path, name="s1", overwrite=True)
 
-os.makedirs(output_dir, exist_ok=True)
+errors = []
 
-# 1. Nodes
-nodes_df = bf.q.nodeProperties().answer().frame()
-nodes_df.to_csv(f"{output_dir}/nodes.csv")
-print("=== Nodes ===")
-print(nodes_df)
+# 1. Проверка наличия всех ожидаемых узлов
+expected_nodes = {"router1", "router2", "router3", "router4", "router5"}
+nodes = set(bf.q.nodeProperties().answer().frame()["Node"])
+missing_nodes = expected_nodes - nodes
+if missing_nodes:
+    errors.append(f"Missing nodes: {missing_nodes}")
 
-# 2. Interfaces
+# 2. Проверка интерфейсов: все активны
 interfaces_df = bf.q.interfaceProperties().answer().frame()
-interfaces_df.to_csv(f"{output_dir}/interfaces.csv")
-print("\n=== Interfaces ===")
-print(interfaces_df)
+down_interfaces = interfaces_df[interfaces_df["Active"] == False]
+if not down_interfaces.empty:
+    errors.append(f"Inactive interfaces:\n{down_interfaces[['Interface','Node']]}")
 
-# 3. Filter Line Reachability
+# 3. Проверка BGP Session Compatibility
 try:
-    filter_df = bf.q.filterLineReachability().answer().frame()
-    filter_df.to_csv(f"{output_dir}/filter_line_reachability.csv")
-    print("\n=== Filter Line Reachability ===")
-    print(filter_df.head(5))
+    bgp_compat = bf.q.bgpSessionCompatibility().answer().frame()
+    incompatible = bgp_compat[bgp_compat["Configured_Status"] != "UNIQUE_MATCH"]
+    if not incompatible.empty:
+        errors.append(f"Incompatible BGP sessions:\n{incompatible[['Node','Remote_Node','Configured_Status']]}")
 except Exception as e:
-    print("Filter Line Reachability not available:", e)
+    errors.append(f"BGP Session Compatibility check failed: {e}")
 
-# 4. BGP Session Compatibility
+# 4. Проверка OSPF Session Compatibility
 try:
-    bgp_compat_df = bf.q.bgpSessionCompatibility().answer().frame()
-    bgp_compat_df.to_csv(f"{output_dir}/bgp_session_compatibility.csv")
-    print("\n=== BGP Session Compatibility ===")
-    print(bgp_compat_df.head(5))
+    ospf_compat = bf.q.ospfSessionCompatibility().answer().frame()
+    not_established = ospf_compat[ospf_compat["Session_Status"] != "ESTABLISHED"]
+    if not not_established.empty:
+        errors.append(f"OSPF sessions not established:\n{not_established[['Interface','Remote_Interface','Session_Status']]}")
 except Exception as e:
-    print("BGP Session Compatibility not available:", e)
+    errors.append(f"OSPF Session Compatibility check failed: {e}")
 
-# 5. BGP Session Status
+# 5. Проверка ACL: отсутствие unreachable lines
 try:
-    bgp_status_df = bf.q.bgpSessionStatus().answer().frame()
-    bgp_status_df.to_csv(f"{output_dir}/bgp_session_status.csv")
-    print("\n=== BGP Session Status ===")
-    print(bgp_status_df.head(5))
+    filters = bf.q.filterLineReachability().answer().frame()
+    unreachable = filters[filters["Unreachable_Line"].notnull()]
+    if not unreachable.empty:
+        errors.append(f"Unreachable filter lines:\n{unreachable[['Sources','Unreachable_Line','Reason']]}")
 except Exception as e:
-    print("BGP Session Status not available:", e)
+    errors.append(f"Filter Line Reachability check failed: {e}")
 
-# 6. BGP Edges
-try:
-    bgp_edges_df = bf.q.bgpEdges().answer().frame()
-    bgp_edges_df.to_csv(f"{output_dir}/bgp_edges.csv")
-    print("\n=== BGP Edges ===")
-    print(bgp_edges_df.head(5))
-except Exception as e:
-    print("BGP Edges not available:", e)
+# Результат теста
+if errors:
+    print("VALIDATION FAILED:")
+    for err in errors:
+        print("-", err)
+    sys.exit(1)
+else:
+    print("VALIDATION PASSED: All nodes, interfaces, BGP/OSPF sessions, and filters are OK.")
 
-# 7. OSPF Session Compatibility
-try:
-    ospf_df = bf.q.ospfSessionCompatibility().answer().frame()
-    ospf_df.to_csv(f"{output_dir}/ospf_session_compatibility.csv")
-    print("\n=== OSPF Session Compatibility ===")
-    print(ospf_df.head(5))
-except Exception as e:
-    print("OSPF Session Compatibility not available:", e)
 
-# 8. OSPF Edges
-try:
-    ospf_edges_df = bf.q.ospfEdges().answer().frame()
-    ospf_edges_df.to_csv(f"{output_dir}/ospf_edges.csv")
-    print("\n=== OSPF Edges ===")
-    print(ospf_edges_df.head(5))
-except Exception as e:
-    print("OSPF Edges not available:", e)
 
+# =========================================
+
+# #!/usr/bin/env python3
+# from pybatfish.client.session import Session
+# import os
+
+# # Настройки
+# bf_address = "127.0.0.1"
+# snapshot_path = "./snapshots/ci_net/s1"
+# output_dir = "./output"
+# network_name = "ci_net"
+
+# # Подключение к Batfish
+# bf = Session(host=bf_address)
+# bf.set_network(network_name)
+# bf.init_snapshot(snapshot_path, name="s1", overwrite=True)
+
+# os.makedirs(output_dir, exist_ok=True)
+
+# # 1. Nodes
+# nodes_df = bf.q.nodeProperties().answer().frame()
+# nodes_df.to_csv(f"{output_dir}/nodes.csv")
+# print("=== Nodes ===")
+# print(nodes_df)
+
+# # 2. Interfaces
+# interfaces_df = bf.q.interfaceProperties().answer().frame()
+# interfaces_df.to_csv(f"{output_dir}/interfaces.csv")
+# print("\n=== Interfaces ===")
+# print(interfaces_df)
+
+# # 3. Filter Line Reachability
+# try:
+#     filter_df = bf.q.filterLineReachability().answer().frame()
+#     filter_df.to_csv(f"{output_dir}/filter_line_reachability.csv")
+#     print("\n=== Filter Line Reachability ===")
+#     print(filter_df.head(5))
+# except Exception as e:
+#     print("Filter Line Reachability not available:", e)
+
+# # 4. BGP Session Compatibility
+# try:
+#     bgp_compat_df = bf.q.bgpSessionCompatibility().answer().frame()
+#     bgp_compat_df.to_csv(f"{output_dir}/bgp_session_compatibility.csv")
+#     print("\n=== BGP Session Compatibility ===")
+#     print(bgp_compat_df.head(5))
+# except Exception as e:
+#     print("BGP Session Compatibility not available:", e)
+
+# # 5. BGP Session Status
+# try:
+#     bgp_status_df = bf.q.bgpSessionStatus().answer().frame()
+#     bgp_status_df.to_csv(f"{output_dir}/bgp_session_status.csv")
+#     print("\n=== BGP Session Status ===")
+#     print(bgp_status_df.head(5))
+# except Exception as e:
+#     print("BGP Session Status not available:", e)
+
+# # 6. BGP Edges
+# try:
+#     bgp_edges_df = bf.q.bgpEdges().answer().frame()
+#     bgp_edges_df.to_csv(f"{output_dir}/bgp_edges.csv")
+#     print("\n=== BGP Edges ===")
+#     print(bgp_edges_df.head(5))
+# except Exception as e:
+#     print("BGP Edges not available:", e)
+
+# # 7. OSPF Session Compatibility
+# try:
+#     ospf_df = bf.q.ospfSessionCompatibility().answer().frame()
+#     ospf_df.to_csv(f"{output_dir}/ospf_session_compatibility.csv")
+#     print("\n=== OSPF Session Compatibility ===")
+#     print(ospf_df.head(5))
+# except Exception as e:
+#     print("OSPF Session Compatibility not available:", e)
+
+# # 8. OSPF Edges
+# try:
+#     ospf_edges_df = bf.q.ospfEdges().answer().frame()
+#     ospf_edges_df.to_csv(f"{output_dir}/ospf_edges.csv")
+#     print("\n=== OSPF Edges ===")
+#     print(ospf_edges_df.head(5))
+# except Exception as e:
+#     print("OSPF Edges not available:", e)
+
+# ==============================================
 
 
 # #!/usr/bin/env python3
