@@ -10,7 +10,7 @@
         mode: '0755'
 
     - name: Copy all device configs (recursive)
-      ansible.builtin.copy:
-        src: "../configs/"
-        dest: "snapshots/ci_net/s1/configs/"
-        recurse: yes
+      ansible.builtin.synchronize:
+        src: ../configs/
+        dest: snapshots/ci_net/s1/configs/
+        recursive: yes
