@@ -1,16 +1,32 @@
-- name: Copy configs into Batfish snapshot folder
-  hosts: localhost
-  connection: local
-  gather_facts: no
+# ansible/playbook.yml
+- hosts: localhost
+  gather_facts: false
   tasks:
     - name: Ensure snapshot dir exists
-      ansible.builtin.file:
-        path: snapshots/ci_net/s1/
+      file:
+        path: snapshots/ci_net/s1
         state: directory
-        mode: '0755'
 
-    - name: Copy all device configs (recursive)
-      ansible.builtin.synchronize:
-        src: ../configs/
-        dest: snapshots/ci_net/s1/configs/
-        recursive: yes
+    - name: Copy real device configs into snapshot
+      copy:
+        src: ../configs/  # путь к твоей папке с конфигами
+        dest: snapshots/ci_net/s1/configs
+        mode: '0644'
+        remote_src: no
+        
+# - name: Copy configs into Batfish snapshot folder
+#   hosts: localhost
+#   connection: local
+#   gather_facts: no
+#   tasks:
+#     - name: Ensure snapshot dir exists
+#       ansible.builtin.file:
+#         path: snapshots/ci_net/s1/
+#         state: directory
+#         mode: '0755'
+
+#     - name: Copy all device configs (recursive)
+#       ansible.builtin.synchronize:
+#         src: ../configs/
+#         dest: snapshots/ci_net/s1/configs/
+#         recursive: yes
