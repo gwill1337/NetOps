@@ -37,10 +37,7 @@ jobs:
       run: |
         sudo mkdir -p snapshots/ci_net/s1/configs/manual
         sudo mkdir -p snapshots/ci_net/s1/configs/generated
-        # for i in {1..5}; do
-        #   sudo touch snapshots/ci_net/s1/router$i.cfg
-        #   echo "! Router $i config" | sudo tee snapshots/ci_net/s1/configs/router$i.cfg >/dev/null
-        # done
+        sudo mkdir -p backup
 
     - name: Generate configs from yaml if have
       run: python tools/conf-generator.py
@@ -51,5 +48,21 @@ jobs:
     - name: Copy configs to snapshot (Ansible)
       run: ansible-playbook ansible/playbook.yml -i ansible/hosts
 
-    - name: Run Python script
+    - name: Run Pytest script
       run: python tests/test_batfish.py
+
+    - name: Backup configs if success
+      if: success()
+      run: |
+        cp snapshots/ci_net/s1/configs/generated/*.cfg backup/
+        cp snapshots/ci_net/s1/configs/manual/*.cfg backup/
+        echo "Configs backed up successfully."
+
+    - name: Commit and Push backups
+      if: success()
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add backup/
+        git commit -m "Backup configs after successful validation" || echo "Nothing to commit"
+        git push
