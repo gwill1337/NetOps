@@ -2,7 +2,7 @@ import os
 import yaml
 from render_config import render_config
 
-DEVICE_DIR = "device-yaml"
+DEVICE_DIR = "snapshots/ci_net/device-yaml"
 OUTPUT_DIR = "snapshots/ci_net/s1/configs"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
