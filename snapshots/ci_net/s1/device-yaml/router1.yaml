@@ -1,0 +1,18 @@
+- os: cisco
+  hostname: router1
+  interfaces:
+    - { name: Ethernet0, ip: 10.0.0.1, mask: 255.255.255.0, shutdown: false }
+    - { name: Ethernet1, ip: 10.0.1.1, mask: 255.255.255.0, shutdown: false }
+  bgp:
+    asn: 65001
+    neighbors:
+      - { ip: 10.0.0.2, remote_as: 65002 }
+
+- os: juniper
+  hostname: edge1
+  interfaces:
+    - { name: ge-0/0/0, ip: 192.168.1.1, mask: 24, shutdown: false }
+  bgp:
+    asn: 64512
+    neighbors:
+      - { ip: 192.168.1.2, remote_as: 64513 }
