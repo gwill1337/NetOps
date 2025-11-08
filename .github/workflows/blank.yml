@@ -11,6 +11,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Start Batfish (Docker)
       run: |
@@ -54,15 +56,14 @@ jobs:
     - name: Backup configs if success
       if: success()
       run: |
-        cp snapshots/ci_net/s1/configs/generated/*.cfg backup/
-        cp snapshots/ci_net/s1/configs/manual/*.cfg backup/
-        echo "Configs backed up successfully."
-
-    - name: Commit and Push backups
-      if: success()
-      run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
+        git checkout -b backup-temp || git checkout backup-temp
+
+        mkdir -p backup
+        cp snapshots/ci_net/s1/configs/generated/*.cfg backup/
+        
         git add backup/
         git commit -m "Backup configs after successful validation" || echo "Nothing to commit"
-        git push
+
+        git push origin HEAD:backup --force
