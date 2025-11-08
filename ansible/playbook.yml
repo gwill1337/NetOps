@@ -1,11 +1,26 @@
-- name: Ensure Batfish snapshot folder exists
-  hosts: localhost
-  tasks:
-    - name: Create snapshot folder
-      file:
-        path: ./snapshots/ci_net/s1
-        state: directory
-        mode: '0755'
+- name: Copy manual configs
+  copy:
+    src: configs/manual/
+    dest: snapshots/ci_net/s1/configs/
+    mode: '0644'
+    remote_src: yes
+
+- name: Copy generated configs
+  copy:
+    src: configs/generated/
+    dest: snapshots/ci_net/s1/configs/
+    mode: '0644'
+    remote_src: yes
+
+
+# - name: Ensure Batfish snapshot folder exists
+#   hosts: localhost
+#   tasks:
+#     - name: Create snapshot folder
+#       file:
+#         path: ./snapshots/ci_net/s1
+#         state: directory
+#         mode: '0755'
 
 
 # # ansible/playbook.yml
