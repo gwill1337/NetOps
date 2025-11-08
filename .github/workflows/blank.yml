@@ -1,5 +1,10 @@
 name: Batfish CI
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'snapshots/**'
+      - 'device-yaml/**'
 
 jobs:
   batfish-ci:
