@@ -15,12 +15,18 @@ for file in os.listdir(DEVICE_DIR):
     with open(path) as f:
         data = yaml.safe_load(f)
 
-    cfg = render_config(data)
-    hostname = data["hostname"]
+    # Если YAML содержит список устройств
+    if isinstance(data, list):
+        devices = data
+    else:
+        devices = [data]
 
-    out_path = os.path.join(OUTPUT_DIR, f"{hostname}_gen.cfg")
+    for device in devices:
+        cfg = render_config(device)
+        hostname = device["hostname"]
 
-    with open(out_path, "w") as out:
-        out.write(cfg)
+        out_path = os.path.join(OUTPUT_DIR, f"{hostname}_gen.cfg")
+        with open(out_path, "w") as out:
+            out.write(cfg)
 
-    print(f"Rendered: {hostname}_gen.cfg")
+        print(f"Rendered: {hostname}_gen.cfg")
