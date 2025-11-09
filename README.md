@@ -37,6 +37,7 @@ On config push, the CI pipeline steps:
 ## Support vendors
 Out of the box, the project supports generating configs from YAML for Cisco, Juniper, and Palo Alto Networks.
 In fact, the project supports [**all vendors supported by batfish**](https://batfish.readthedocs.io/en/latest/supported_devices.html) but configuration generation is manual except for the three vendors mentioned above.
+But you can create your own jinja2 template for config generation.
 
 
 ## Repository structure/map
